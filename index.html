@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>J.A.R.V.I.S. Co-Architect</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      background: #0d1a36;
+      color: white;
+      font-family: sans-serif;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+    .chat-container {
+      flex-grow: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column-reverse; /* Newest messages at the bottom */
+    }
+    .message-bubble {
+      max-width: 80%;
+      margin-bottom: 10px;
+      padding: 10px 15px;
+      border-radius: 15px;
+      position: relative;
+      word-wrap: break-word;
+    }
+    .user-bubble {
+      background-color: #2563eb; /* Blue for user */
+      margin-left: auto;
+      border-bottom-right-radius: 5px;
+    }
+    .model-bubble {
+      background-color: #374151; /* Gray for model */
+      margin-right: auto;
+      border-bottom-left-radius: 5px;
+    }
+    .icon {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 20px;
+      height: 20px;
+    }
+    .icon.agent {
+      left: -25px;
+      background-color: #10b981; /* Green */
+      border-radius: 50%;
+    }
+    .icon.cloud {
+      left: -25px;
+      background-color: #f97316; /* Orange */
+      border-radius: 50%;
+    }
+    .icon.local {
+      left: -25px;
+      background-color: #6366f1; /* Indigo */
+      border-radius: 50%;
+    }
+    .icon-img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+  </style>
+</head>
+<body>
+  <div class="max-w-4xl mx-auto flex flex-col flex-grow w-full">
+    <h1 class="text-3xl font-bold text-cyan-400 mb-6">J.A.R.V.I.S. Co-Architect</h1>
+    
+    <div id="chat" class="chat-container mb-6 p-4 bg-gray-900 rounded-lg"></div>
+
+    <div class="flex gap-2 mt-auto">
+      <input 
+        id="userInput" 
+        type="text" 
+        placeholder="e.g., Take a screenshot of the desktop" 
+        class="flex-1 p-3 bg-gray-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+        onkeypress="if(event.key==='Enter') sendCommand()"
+      />
+      <button onclick="sendCommand()" class="px-6 py-3 bg-cyan-700 hover:bg-cyan-600 rounded-lg font-medium">Send</button>
+    </div>
+
+    <p class="mt-4 text-sm text-gray-400">
+      💡 Try: "Open Firefox and go to google.com", "Take a screenshot", or "Explain neural networks"
+    </p>
+  </div>
+
+  <script>
+    const chatEl = document.getElementById('chat');
+    const inputEl = document.getElementById('userInput');
+
+    const config = {
+      BYTEBOT_API_URL: "http://localhost:9991/tasks",
+      GEMINI_API_URL: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
+      GEMINI_API_KEY: "${GEMINI_API_KEY}", // Replaced by deploy.sh
+      OLLAMA_API_URL: "http://localhost:11434/api/generate",
+      USE_LOCAL_LLM: false, // Set by deploy.sh
+    };
+
+    function appendMessage(role, content, source = 'unknown') {
+      const div = document.createElement('div');
+      div.className = `message-bubble ${role === 'user' ? 'user-bubble' : 'model-bubble'}`;
+      
+      let iconHtml = '';
+      if (source === 'agent') {
+        iconHtml = '<div class="icon agent"><img src="/bytebot_icon.svg" alt="Agent" class="icon-img"></div>';
+      } else if (source === 'cloud') {
+        iconHtml = '<div class="icon cloud"><img src="/bytebot_icon.svg" alt="Cloud" class="icon-img"></div>';
+      } else if (source === 'local') {
+        iconHtml = '<div class="icon local"><img src="/bytebot_icon.svg" alt="Local" class="icon-img"></div>';
+      }
+
+      div.innerHTML = `${iconHtml}<strong>${role === 'user' ? 'You' : 'J.A.R.V.I.S.'}:</strong> ${content}`;
+      chatEl.prepend(div); // Add to top for reverse-column display
+      chatEl.scrollTop = chatEl.scrollHeight; // Keep scrolled to bottom
+    }
+
+    async function callGemini(prompt) {
+      if (!config.GEMINI_API_KEY || config.GEMINI_API_KEY === "${GEMINI_API_KEY}") {
+        throw new Error("Gemini API Key not configured.");
+      }
+      const response = await fetch(config.GEMINI_API_URL + `?key=${config.GEMINI_API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }]
+        })
+      });
+      const data = await response.json();
+      if (response.ok && data.candidates && data.candidates.length > 0) {
+        return data.candidates[0].content.parts[0].text;
+      } else {
+        throw new Error(data.error?.message || 'Unknown Gemini error');
+      }
+    }
+
+    async function callLocalLLM(prompt) {
+      const response = await fetch(config.OLLAMA_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: "llama3.1:8b", // Ensure this model is pulled in Ollama
+          prompt: prompt,
+          stream: false
+        })
+      });
+      const data = await response.json();
+      if (response.ok && data.response) {
+        return data.response;
+      } else {
+        throw new Error(data.error || 'Unknown Local LLM error');
+      }
+    }
+
+    async function sendCommand() {
+      const msg = inputEl.value.trim();
+      if (!msg) return;
+
+      appendMessage('user', msg);
+      inputEl.value = '';
+
+      // Detect if needs Bytebot Agent action
+      const needsAgent = /screenshot|open|close|type|click|scroll|debug|api\.sovr\.com/i.test(msg);
+      if (needsAgent) {
+        appendMessage('model', "Delegating to Bytebot Agent...", 'agent');
+        try {
+          const response = await fetch(config.BYTEBOT_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description: msg })
+          });
+          const data = await response.json();
+          if (response.ok) {
+            appendMessage('model', `✅ Task queued: <code>${data.id}</code><br>Status: ${data.status}`, 'agent');
+          } else {
+            appendMessage('model', `❌ Agent error: ${data.message || 'Unknown'}`, 'agent');
+          }
+        } catch (err) {
+          appendMessage('model', `⚠️ Failed to reach Bytebot Agent: ${err.message}`, 'agent');
+        }
+        return;
+      }
+
+      // Detect if needs web knowledge → use Gemini
+      const needsWeb = /news|today|latest|current|weather|stock|api\.sovr\.com|google/i.test(msg);
+      if (needsWeb) {
+        appendMessage('model', "🧠 Thinking with Gemini...", 'cloud');
+        try {
+          const response = await callGemini(msg);
+          appendMessage('model', response, 'cloud');
+        } catch (err) {
+          appendMessage('model', `❌ Gemini error: ${err.message}`, 'cloud');
+        }
+        return;
+      }
+
+      // Default: use Local Llama
+      if (config.USE_LOCAL_LLM) {
+        appendMessage('model', "🧠 Thinking locally with Llama 3.1...", 'local');
+        try {
+          const response = await callLocalLLM(msg);
+          appendMessage('model', response, 'local');
+        } catch (err) {
+          appendMessage('model', `❌ Local LLM error. Falling back to Gemini...`, 'local');
+          // Fallback to Gemini
+          try {
+            const response = await callGemini(msg);
+            appendMessage('model', response, 'cloud');
+          } catch (geminiErr) {
+            appendMessage('model', `❌ All models failed: ${geminiErr.message}`, 'cloud');
+          }
+        }
+      } else {
+        // Fallback to Gemini if local disabled
+        appendMessage('model', "🧠 Using Gemini...", 'cloud');
+        try {
+          const response = await callGemini(msg);
+          appendMessage('model', response, 'cloud');
+        } catch (err) {
+          appendMessage('model', `❌ Gemini error: ${err.message}`, 'cloud');
+        }
+      }
+    }
+  </script>
+</body>
+</html>

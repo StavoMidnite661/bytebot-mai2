@@ -1,0 +1,41 @@
+services:
+  bytebot-agent:
+    image: ghcr.io/bytebot-ai/bytebot-agent:edge
+    ports:
+      - "9991:9991"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - DATABASE_URL=postgresql://postgres:password@bytebot-postgres:5432/bytebot
+    depends_on:
+      - bytebot-postgres
+
+  bytebot-desktop:
+    image: ghcr.io/bytebot-ai/bytebot-desktop:edge
+    ports:
+      - "9990:9990"
+    depends_on:
+      - bytebot-agent
+
+  bytebot-co-creator-ui:
+    build:
+      context: ..
+      dockerfile: Dockerfile.ui
+    ports:
+      - "3000:3000"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - NEXT_PUBLIC_AGENT_API_URL=http://bytebot-agent:9991
+    depends_on:
+      - bytebot-agent
+
+  bytebot-postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: bytebot
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

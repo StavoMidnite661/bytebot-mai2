@@ -1,0 +1,33 @@
+import { OnModuleDestroy } from '@nestjs/common';
+import { ComputerUseService } from '../computer-use/computer-use.service';
+import { InputTrackingGateway } from './input-tracking.gateway';
+export declare class InputTrackingService implements OnModuleDestroy {
+    private readonly gateway;
+    private readonly computerUseService;
+    private readonly logger;
+    private isTracking;
+    private isDragging;
+    private dragMouseAction;
+    private scrollAction;
+    private scrollCount;
+    private clickMouseActionBuffer;
+    private clickMouseActionTimeout;
+    private readonly CLICK_DEBOUNCE_MS;
+    private screenshot;
+    private screenshotTimeout;
+    private readonly SCREENSHOT_DEBOUNCE_MS;
+    private readonly pressedKeys;
+    private readonly typingBuffer;
+    private typingTimer;
+    private readonly TYPING_DEBOUNCE_MS;
+    constructor(gateway: InputTrackingGateway, computerUseService: ComputerUseService);
+    onModuleDestroy(): void;
+    startTracking(): void;
+    stopTracking(): void;
+    private bufferChar;
+    private flushTypingBuffer;
+    private isModifierKey;
+    private registerListeners;
+    private mapButton;
+    private logAction;
+}
