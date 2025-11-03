@@ -29,28 +29,13 @@ else
   USE_LOCAL_LLM=false
 fi
 
-# ─── STEP 2: Prepare .env for UI ────────────────────────────────────────────
-log "Preparing .env for UI..."
-# Read GEMINI_API_KEY from docker/.env
-GEMINI_API_KEY=$(grep -E '^GEMINI_API_KEY=' docker/.env | cut -d '=' -f2)
-if [ -z "$GEMINI_API_KEY" ]; then
-  warn "GEMINI_API_KEY not found in docker/.env. UI might not function correctly for cloud LLM."
-fi
-
-# Replace placeholder in index.html with actual GEMINI_API_KEY and USE_LOCAL_LLM status
-# Use a temporary file for sed to work across systems
-sed -i.bak "s|// Replaced by deploy.sh|"${GEMINI_API_KEY}"|" index.html
-sed -i.bak "s|USE_LOCAL_LLM: false,|USE_LOCAL_LLM: ${USE_LOCAL_LLM},|" index.html
-rm index.html.bak
-log "✅ index.html updated with environment variables."
-
-# ─── STEP 3: Build and Start Docker Containers ────────────────────────────────
+# ─── STEP 2: Build and Start Docker Containers ────────────────────────────────
 log "Building and starting Docker containers..."
 docker-compose -f docker/docker-compose.yml down --remove-orphans || true
 docker-compose -f docker/docker-compose.yml up -d --build || error "Failed to start Docker containers."
 log "✅ Docker containers started."
 
-# ─── STEP 4: Verify Agent API ─────────────────────────────────────────────────
+# ─── STEP 3: Verify Agent API ─────────────────────────────────────────────────
 log "Waiting for Bytebot Agent API to be ready..."
 for i in {1..20}; do
   if curl -s http://localhost:9991/tasks >/dev/null; then
@@ -65,12 +50,20 @@ if [ "$AGENT_READY" != true ]; then
   error "Bytebot Agent API did not become ready in time."
 fi
 
-# ─── STEP 5: Serve UI ─────────────────────────────────────────────────────────
-log "Serving J.A.R.V.I.S. UI..."
-npx http-server -p 3000 & 
-UI_PID=$!
-log "✅ J.A.R.V.I.S. UI served on http://localhost:3000 (PID: $UI_PID)"
-log "Deployment complete. Open http://localhost:3000 in your browser."
+# ─── STEP 4: Verify UI ────────────────────────────────────────────────────────
+log "Waiting for J.A.R.V.I.S. UI to be ready..."
+for i in {1..20}; do
+  if curl -s http://localhost:3000 >/dev/null; then
+    log "✅ J.A.R.V.I.S. UI is reachable."
+    UI_READY=true
+    break
+  fi
+  sleep 1
+done
 
-# Keep the script running to keep http-server alive
-wait $UI_PID
+if [ "$UI_READY" != true ]; then
+  error "J.A.R.V.I.S. UI did not become ready in time."
+fi
+
+log "Deployment complete. Open http://localhost:3000 in your browser."
+log "To shut down the services, run: docker-compose -f docker/docker-compose.yml down"
